@@ -1,22 +1,113 @@
 # -*- coding: utf-8 -*-
 """
 AQUO · SERVICIO DE RENDER DE REELS (nube)
-Servidor pequeño que Make llama por HTTP. Recibe la orden, responde 202 rápido,
-y lanza render_worker.py como proceso independiente para montar el .mp4, subirlo
-a Drive y avisar a Make. El worker corre aparte porque ffmpeg vía subprocess se
-cuelga dentro de hilos del servidor HTTP.
+Servidor que Make/Netlify llama por HTTP. Recibe la orden, responde 202 al
+instante, y monta el reel EN UN HILO importando el motor como módulo (sin
+lanzar otro proceso Python: en el contenedor de Render lanzar subprocess de
+Python fallaba silenciosamente). El motor llama a ffmpeg por su cuenta —eso
+es un subprocess de ffmpeg, no de Python, y funciona bien dentro del hilo.
 NO corre en Netlify (necesita ffmpeg). Vive en Render (Docker con ffmpeg).
 Credenciales SIEMPRE por variable de entorno, nunca en el código.
 """
-import os, sys, json, subprocess
+import os, sys, json, time, tempfile, threading, traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-WORKER = os.path.join(HERE, "render_worker.py")
+# El motor puede estar en ./motor o en la raíz (si se subió plano a GitHub).
+if os.path.exists(os.path.join(HERE, "motor", "aquo_motor.py")):
+    MOTOR_DIR = os.path.join(HERE, "motor")
+else:
+    MOTOR_DIR = HERE
+sys.path.insert(0, MOTOR_DIR)
+
 RENDER_TOKEN = os.environ.get("RENDER_TOKEN", "")
+DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID", "1crIrrHpiZu3PgX8ovhIWAqKIcNC9Rtby")
+WEBHOOK_ENTREGA = os.environ.get(
+    "WEBHOOK_ENTREGA", "https://hook.eu1.make.com/iebp5goalo1a39bsz04ib6aump4kkjx8")
 PORT = int(os.environ.get("PORT", "10000"))
 
-def _log(*a): print("[server]", *a, flush=True)
+def _log(*a): print("[render]", *a, flush=True)
+
+
+def monta_reel(orden, salida):
+    # El motor usa rutas relativas; corremos desde su carpeta sólo durante el
+    # montaje. Como el servidor es de un solo render a la vez en plan free, es
+    # seguro. (Si se paraleliza, habría que serializar con un lock.)
+    cwd = os.getcwd()
+    os.chdir(MOTOR_DIR)
+    try:
+        capa = int(orden.get("capa", 1))
+        familia = orden.get("familia")
+        ritmo = orden.get("ritmo") or "sereno"
+        if capa == 2:
+            from capa2_real import crea_reel_metraje
+            c1 = os.path.join(MOTOR_DIR, "clips", orden["clip"])
+            c2 = os.path.join(MOTOR_DIR, orden["clip"])
+            clip_path = c1 if os.path.exists(c1) else c2
+            guion = orden["guion"]
+            if isinstance(guion, dict): guion = [guion]
+            crea_reel_metraje(clip_path, guion, salida=salida,
+                              familia=familia or "PROFUNDO", ritmo=ritmo)
+        else:
+            from aquo_motor import crea_reel
+            crea_reel(orden["guion"], salida=salida,
+                      familia=familia, ritmo=ritmo, seed=orden.get("seed"))
+    finally:
+        os.chdir(cwd)
+    return salida
+
+
+def sube_a_drive(path_mp4, nombre):
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    info = json.loads(os.environ.get("GOOGLE_SA_JSON", "{}"))
+    creds = service_account.Credentials.from_service_account_info(
+        info, scopes=["https://www.googleapis.com/auth/drive"])
+    service = build("drive", "v3", credentials=creds, cache_discovery=False)
+    meta = {"name": nombre, "parents": [DRIVE_FOLDER_ID]}
+    media = MediaFileUpload(path_mp4, mimetype="video/mp4", resumable=False)
+    f = service.files().create(body=meta, media_body=media, fields="id").execute()
+    fid = f["id"]
+    service.permissions().create(
+        fileId=fid, body={"role": "reader", "type": "anyone"}).execute()
+    return f"https://drive.google.com/uc?export=download&id={fid}"
+
+
+def avisa_make(video_url, pieza, caption):
+    import urllib.request
+    payload = json.dumps({
+        "s1": video_url, "s2": video_url, "s3": video_url,
+        "s4": video_url, "s5": video_url,
+        "pieza": pieza, "caption": caption, "tipo": "reel",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        WEBHOOK_ENTREGA, data=payload,
+        headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.status
+
+
+def trabajo(orden):
+    try:
+        pieza = orden.get("pieza", f"reel_{int(time.time())}")
+        caption = orden.get("caption", "")
+        nombre = f"{pieza}.mp4"
+        out = os.path.join(tempfile.gettempdir(), nombre)
+        _log("montando", pieza, "capa", orden.get("capa", 1))
+        monta_reel(orden, out)
+        _log("montado", os.path.getsize(out), "bytes")
+        _log("subiendo a Drive...")
+        url = sube_a_drive(out, nombre)
+        _log("en Drive:", url)
+        avisa_make(url, pieza, caption)
+        _log("avisado Make. OK", pieza)
+        try: os.remove(out)
+        except OSError: pass
+    except Exception as e:
+        _log("ERROR:", repr(e))
+        traceback.print_exc()
+
 
 class Handler(BaseHTTPRequestHandler):
     def _json(self, code, obj):
@@ -44,30 +135,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": f"json invalido: {e}"})
         if not orden.get("guion"):
             return self._json(400, {"ok": False, "error": "falta 'guion'"})
-
-        # Lanza el render en un HILO que ejecuta el worker como subprocess y lo
-        # ESPERA (subprocess.run). Así el proceso no queda huérfano —Render mata
-        # los procesos huérfanos del request— y a la vez sus logs se capturan y
-        # salen en Render. El hilo permite responder 202 al instante.
-        import threading
-        def correr():
-            try:
-                r = subprocess.run(
-                    [sys.executable, "-u", WORKER, json.dumps(orden)],
-                    env=os.environ.copy(),
-                    capture_output=True, text=True, timeout=600)
-                if r.stdout: print(r.stdout, flush=True)
-                if r.stderr: print("[worker-err]", r.stderr, flush=True)
-                _log("worker terminó código", r.returncode)
-            except Exception as e:
-                _log("worker EXCEPCIÓN:", str(e))
-        threading.Thread(target=correr, daemon=True).start()
-        _log("lanzado worker para", orden.get("pieza", "reel"))
+        threading.Thread(target=trabajo, args=(orden,), daemon=True).start()
+        _log("lanzado montaje para", orden.get("pieza", "reel"))
         return self._json(202, {"ok": True, "estado": "montando",
                                 "pieza": orden.get("pieza", "reel")})
 
     def log_message(self, *a): pass
 
+
 if __name__ == "__main__":
-    _log(f"arrancando en :{PORT}")
+    _log(f"arrancando en :{PORT}  ·  motor en {MOTOR_DIR}")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

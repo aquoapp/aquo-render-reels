@@ -44,10 +44,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": f"json invalido: {e}"})
         if not orden.get("guion"):
             return self._json(400, {"ok": False, "error": "falta 'guion'"})
-        subprocess.Popen([sys.executable, WORKER, json.dumps(orden)],
-                         env=os.environ.copy(),
-                         start_new_session=True,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Lanza el render en un HILO que ejecuta el worker como subprocess y lo
+        # ESPERA (subprocess.run). Así el proceso no queda huérfano —Render mata
+        # los procesos huérfanos del request— y a la vez sus logs se capturan y
+        # salen en Render. El hilo permite responder 202 al instante.
+        import threading
+        def correr():
+            try:
+                r = subprocess.run(
+                    [sys.executable, "-u", WORKER, json.dumps(orden)],
+                    env=os.environ.copy(),
+                    capture_output=True, text=True, timeout=600)
+                if r.stdout: print(r.stdout, flush=True)
+                if r.stderr: print("[worker-err]", r.stderr, flush=True)
+                _log("worker terminó código", r.returncode)
+            except Exception as e:
+                _log("worker EXCEPCIÓN:", str(e))
+        threading.Thread(target=correr, daemon=True).start()
         _log("lanzado worker para", orden.get("pieza", "reel"))
         return self._json(202, {"ok": True, "estado": "montando",
                                 "pieza": orden.get("pieza", "reel")})

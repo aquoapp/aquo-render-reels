@@ -11,9 +11,10 @@ from aquo_motor import frame_cierre, ease, RITMOS, FPS
 
 TINTA=(28,42,66)  # azul tinta profunda, no negro puro
 
-def _pluma_font(size): return ImageFont.truetype("fonts/Allura-Regular.ttf", size)
+from aquo_reel import _asset
+def _pluma_font(size): return ImageFont.truetype(_asset("Allura-Regular.ttf"), size)
 def _sub_font(size, familia="PAPEL"):
-    f=ImageFont.truetype("fonts/CormorantGaramond[wght].ttf", size)
+    f=ImageFont.truetype(_asset("CormorantGaramond[wght].ttf"), size)
     try: f.set_variation_by_axes([500])
     except: pass
     return f
@@ -24,7 +25,7 @@ def render_pluma(lineas_manuscritas, subtexto, salida, papel="papel_pluma.png", 
     subtexto: línea final en Cormorant (firma/cierre del mensaje), puede ser ''
     """
     R=RITMOS[ritmo]
-    base=Image.open(papel).convert("RGB")
+    base=Image.open(_asset(papel)).convert("RGB")
     # 1) Renderizo el texto manuscrito COMPLETO en una capa aparte
     capa=Image.new("RGBA",(W,H),(0,0,0,0)); d=ImageDraw.Draw(capa)
     fnt=_pluma_font(140)

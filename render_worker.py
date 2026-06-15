@@ -9,7 +9,12 @@ dentro de hilos y de multiprocessing-fork del servidor HTTP.
 import os, sys, json, time, tempfile, traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MOTOR_DIR = os.path.join(HERE, "motor")
+# El motor puede estar en ./motor (subcarpeta) o en la propia raíz (si los
+# archivos se subieron sueltos a GitHub). Detectamos dónde está aquo_motor.py.
+if os.path.exists(os.path.join(HERE, "motor", "aquo_motor.py")):
+    MOTOR_DIR = os.path.join(HERE, "motor")
+else:
+    MOTOR_DIR = HERE
 sys.path.insert(0, MOTOR_DIR)
 os.chdir(MOTOR_DIR)
 
@@ -24,7 +29,10 @@ def monta_reel(orden, salida):
     ritmo = orden.get("ritmo") or "sereno"
     if capa == 2:
         from capa2_real import crea_reel_metraje
-        clip_path = os.path.join(MOTOR_DIR, "clips", orden["clip"])
+        # El clip puede estar en clips/<nombre> o suelto en la raíz del motor.
+        c1 = os.path.join(MOTOR_DIR, "clips", orden["clip"])
+        c2 = os.path.join(MOTOR_DIR, orden["clip"])
+        clip_path = c1 if os.path.exists(c1) else c2
         guion = orden["guion"]
         if isinstance(guion, dict):
             guion = [guion]

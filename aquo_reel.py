@@ -1,19 +1,36 @@
 # -*- coding: utf-8 -*-
 """AQUO · Motor de reels — núcleo. Olivo ampliado + sin filo."""
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import random
+import random, os
 
 W, H = 1080, 1920
 NAVY=(16,42,67); AGUA=(91,167,199); ARENA=(233,226,214); MARFIL=(247,244,239)
 OLIVA=(122,127,105); TIERRA=(201,178,155); AMBAR=(201,162,75)
-FONTS="fonts/"
+
+# Localiza un asset (fuente, olivo, papel) esté en fonts/, en la raíz, o junto
+# a este archivo. Hace el motor inmune a cómo se subieron los archivos.
+_BASE = os.path.dirname(os.path.abspath(__file__))
+def _asset(nombre):
+    candidatos = [
+        nombre,                                   # cwd
+        os.path.join("fonts", os.path.basename(nombre)),
+        os.path.join(_BASE, nombre),
+        os.path.join(_BASE, "fonts", os.path.basename(nombre)),
+        os.path.join(_BASE, os.path.basename(nombre)),
+    ]
+    for c in candidatos:
+        if os.path.exists(c):
+            return c
+    return nombre  # último recurso: deja que PIL lance el error claro
+
+FONTS=""  # ya no se usa como prefijo; _asset resuelve la ruta
 
 # cache de olivos recortados al contenido
 _olivo_cache={}
 def _olivo_recortado(familia):
     if familia in _olivo_cache: return _olivo_cache[familia]
     src="olivo_navy.png" if familia=="PROFUNDO" else "olivo_marfil.png"
-    o=Image.open(src).convert("RGBA")
+    o=Image.open(_asset(src)).convert("RGBA")
     bbox=o.split()[3].getbbox()      # recorta a las hojas reales
     o=o.crop(bbox)
     _olivo_cache[familia]=o
@@ -21,7 +38,7 @@ def _olivo_recortado(familia):
 
 def font(kind, size, weight=400):
     fmap={"serif":"CormorantGaramond[wght].ttf","serif-it":"CormorantGaramond-Italic[wght].ttf","display":"Outfit[wght].ttf"}
-    f=ImageFont.truetype(FONTS+fmap[kind],size)
+    f=ImageFont.truetype(_asset(fmap[kind]),size)
     try:f.set_variation_by_axes([weight])
     except Exception:pass
     return f

@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: aquo-render-reels
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: WEBHOOK_ENTREGA
+        sync: false
+      - key: DRIVE_FOLDER_ID
+        sync: false
+      - key: RENDER_TOKEN
+        sync: false
+      - key: GOOGLE_SA_JSON
+        sync: false

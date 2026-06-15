@@ -46,11 +46,30 @@ def monta_reel(orden, salida):
     return salida
 
 
+def _carga_credenciales_google():
+    """Carga el JSON de la cuenta de servicio de forma robusta.
+    Orden: (1) Secret File en /etc/secrets/, (2) variable GOOGLE_SA_JSON.
+    Tolera espacios/comillas envolventes accidentales al pegar en Render."""
+    import json as _json
+    # 1) Secret File (la vía recomendada para JSON con private_key multilínea)
+    for ruta in ("/etc/secrets/GOOGLE_SA_JSON", "/etc/secrets/google_sa.json",
+                 "/etc/secrets/credenciales.json"):
+        if os.path.exists(ruta):
+            with open(ruta, "r") as fh:
+                return _json.loads(fh.read())
+    # 2) Variable de entorno
+    raw = os.environ.get("GOOGLE_SA_JSON", "").strip()
+    # quita comillas envolventes accidentales
+    if (raw.startswith("'") and raw.endswith("'")) or (raw.startswith('"') and raw.endswith('"')):
+        raw = raw[1:-1]
+    return _json.loads(raw)
+
+
 def sube_a_drive(path_mp4, nombre):
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
-    info = json.loads(os.environ.get("GOOGLE_SA_JSON", "{}"))
+    info = _carga_credenciales_google()
     creds = service_account.Credentials.from_service_account_info(
         info, scopes=["https://www.googleapis.com/auth/drive"])
     service = build("drive", "v3", credentials=creds, cache_discovery=False)

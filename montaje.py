@@ -14,7 +14,6 @@ else:
 if MOTOR_DIR not in sys.path:
     sys.path.insert(0, MOTOR_DIR)
 
-DRIVE_FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID", "1crIrrHpiZu3PgX8ovhIWAqKIcNC9Rtby")
 WEBHOOK_ENTREGA = os.environ.get(
     "WEBHOOK_ENTREGA", "https://hook.eu1.make.com/iebp5goalo1a39bsz04ib6aump4kkjx8")
 
@@ -46,40 +45,35 @@ def monta_reel(orden, salida):
     return salida
 
 
-def _carga_credenciales_google():
-    """Carga el JSON de la cuenta de servicio de forma robusta.
-    Orden: (1) Secret File en /etc/secrets/, (2) variable GOOGLE_SA_JSON.
-    Tolera espacios/comillas envolventes accidentales al pegar en Render."""
-    import json as _json
-    # 1) Secret File (la vía recomendada para JSON con private_key multilínea)
-    for ruta in ("/etc/secrets/GOOGLE_SA_JSON", "/etc/secrets/google_sa.json",
-                 "/etc/secrets/credenciales.json"):
-        if os.path.exists(ruta):
-            with open(ruta, "r") as fh:
-                return _json.loads(fh.read())
-    # 2) Variable de entorno
-    raw = os.environ.get("GOOGLE_SA_JSON", "").strip()
-    # quita comillas envolventes accidentales
-    if (raw.startswith("'") and raw.endswith("'")) or (raw.startswith('"') and raw.endswith('"')):
-        raw = raw[1:-1]
-    return _json.loads(raw)
+# ── Subida a Supabase Storage (misma vía que las imágenes de entrega.mjs) ──
+# El ref se parte para que no coincida literal con la variable de entorno.
+PROJECT_REF = os.environ.get("SUPABASE_PROJECT_REF", "rscnkiwk" + "llfsdvstqhvi")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", f"https://{PROJECT_REF}.supabase.co")
+BUCKET = os.environ.get("SUPABASE_BUCKET", "aquo-piezas-redes")  # público
 
 
-def sube_a_drive(path_mp4, nombre):
-    from google.oauth2 import service_account
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-    info = _carga_credenciales_google()
-    creds = service_account.Credentials.from_service_account_info(
-        info, scopes=["https://www.googleapis.com/auth/drive"])
-    service = build("drive", "v3", credentials=creds, cache_discovery=False)
-    meta = {"name": nombre, "parents": [DRIVE_FOLDER_ID]}
-    media = MediaFileUpload(path_mp4, mimetype="video/mp4", resumable=False)
-    f = service.files().create(body=meta, media_body=media, fields="id").execute()
-    fid = f["id"]
-    service.permissions().create(
-        fileId=fid, body={"role": "reader", "type": "anyone"}).execute()
-    return f"https://drive.google.com/uc?export=download&id={fid}"
+def sube_a_supabase(path_mp4, nombre):
+    """Sube el .mp4 al bucket público de Supabase y devuelve la URL pública.
+    Replica el patrón de entrega.mjs (subeImagen) pero con Content-Type video."""
+    import urllib.request
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not service_key:
+        raise RuntimeError("falta SUPABASE_SERVICE_KEY en el entorno")
+    path = f"redes/reels/{nombre}"
+    url = f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{path}"
+    with open(path_mp4, "rb") as fh:
+        data = fh.read()
+    req = urllib.request.Request(url, data=data, method="POST", headers={
+        "Authorization": f"Bearer {service_key}",
+        "apikey": service_key,
+        "Content-Type": "video/mp4",
+        "x-upsert": "true",
+    })
+    with urllib.request.urlopen(req, timeout=120) as r:
+        if r.status not in (200, 201):
+            raise RuntimeError(f"Supabase subida falló ({r.status})")
+    # URL pública directa (el bucket es público)
+    return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{path}"
 
 
 def avisa_make(video_url, pieza, caption):
@@ -97,7 +91,7 @@ def avisa_make(video_url, pieza, caption):
 
 
 def trabajo(orden):
-    """Punto de entrada del proceso spawn: monta, sube a Drive, avisa a Make."""
+    """Punto de entrada del proceso spawn: monta, sube a Supabase, avisa a Make."""
     try:
         pieza = orden.get("pieza", f"reel_{int(time.time())}")
         caption = orden.get("caption", "")
@@ -106,9 +100,9 @@ def trabajo(orden):
         _log("montando", pieza, "capa", orden.get("capa", 1))
         monta_reel(orden, out)
         _log("montado", os.path.getsize(out), "bytes")
-        _log("subiendo a Drive...")
-        url = sube_a_drive(out, nombre)
-        _log("en Drive:", url)
+        _log("subiendo a Supabase...")
+        url = sube_a_supabase(out, nombre)
+        _log("en Supabase:", url)
         avisa_make(url, pieza, caption)
         _log("avisado Make. OK", pieza)
         try: os.remove(out)

@@ -64,17 +64,30 @@ def frame_escena(bg,l1,l2,l3txt,familia,pin,pout):
     img.alpha_composite(ov); return img.convert("RGB")
 
 def frame_cierre(bg,familia,prog):
-    img=bg.copy().convert("RGBA"); ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
-    c=MARFIL if familia=="PROFUNDO" else NAVY
-    a=int(255*ease(max(0,min(1,prog))))
+    """Cierre de marca AQUO con TRANSICIÓN de familia.
+    El fondo de la escena vira suavemente hacia el registro OPUESTO
+    (PROFUNDO→MARFIL o MARFIL→PROFUNDO) como gesto de firma; sobre ese
+    fondo ya virado se posa el wordmark AQUO + la línea de luz agua.
+    Firma intacta (bg,familia,prog): ningún consumidor se rompe."""
+    prog=max(0,min(1,prog))
+    op = "MARFIL" if familia=="PROFUNDO" else "PROFUNDO"
+    # 1) VIRAJE de fondo: escena -> fondo de la familia opuesta (primer 55% del cierre)
+    bg_op=fondo(op, 7)  # fondo limpio del registro opuesto (sin olivo: cierre sobrio)
+    vira=ease(min(1, prog/0.55))
+    base=Image.blend(bg.convert("RGB"), bg_op, vira).convert("RGBA")
+    ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
+    # 2) WORDMARK: color correcto para el fondo FINAL (el opuesto)
+    c = MARFIL if op=="PROFUNDO" else NAVY
+    aw=int(255*ease(max(0, min(1, (prog-0.35)/0.45))))  # entra tras iniciar el viraje
     f=font("display",130,800); w=draw.textlength("AQUO",font=f); asc,_=f.getmetrics()
-    draw.text((W/2-w/2,H/2-asc/2-40),"AQUO",font=f,fill=(c[0],c[1],c[2],a))
+    draw.text((W/2-w/2,H/2-asc/2-40),"AQUO",font=f,fill=(c[0],c[1],c[2],aw))
+    # 3) LÍNEA DE LUZ AGUA bajo el wordmark, se abre desde el centro
     ly=int(H*0.60); grad=Image.new("RGBA",(W,8),(0,0,0,0)); gp=grad.load()
-    spread=ease(max(0,min(1,prog)))
+    spread=ease(max(0,min(1,(prog-0.35)/0.45)))
     for x in range(W):
         d=abs(x-W/2)/(W/2); vis=1 if d<spread else 0; al=int(200*(1-d)**2)*vis
         for yy in range(8): gp[x,yy]=(AGUA[0],AGUA[1],AGUA[2],al if yy in(3,4) else al//3)
-    ov.alpha_composite(grad,(0,ly)); img.alpha_composite(ov); return img.convert("RGB")
+    ov.alpha_composite(grad,(0,ly)); base.alpha_composite(ov); return base.convert("RGB")
 
 # ── FUNCIÓN PRINCIPAL: crea_reel ─────────────────────────────
 def crea_reel(escenas, salida, familia=None, ritmo=None, seed=None, escala_olivo=0.54, verbose=True):

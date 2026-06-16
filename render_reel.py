@@ -28,17 +28,23 @@ def frame_escena(bg,l1,l2,l3,familia,pin,pout):
     img.alpha_composite(ov); return img.convert("RGB")
 
 def frame_cierre(bg,familia,prog):
-    img=bg.copy().convert("RGBA"); ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
-    c=MARFIL if familia=="PROFUNDO" else NAVY
-    a=int(255*ease(max(0,min(1,prog))))
+    """Cierre de marca AQUO con TRANSICIÓN de familia (idéntico a aquo_motor)."""
+    prog=max(0,min(1,prog))
+    op = "MARFIL" if familia=="PROFUNDO" else "PROFUNDO"
+    bg_op=fondo(op, 7)
+    vira=ease(min(1, prog/0.55))
+    base=Image.blend(bg.convert("RGB"), bg_op, vira).convert("RGBA")
+    ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
+    c = MARFIL if op=="PROFUNDO" else NAVY
+    aw=int(255*ease(max(0, min(1, (prog-0.35)/0.45))))
     f=font("display",130,800); w=draw.textlength("AQUO",font=f); asc,_=f.getmetrics()
-    draw.text((W/2-w/2,H/2-asc/2-40),"AQUO",font=f,fill=(c[0],c[1],c[2],a))
+    draw.text((W/2-w/2,H/2-asc/2-40),"AQUO",font=f,fill=(c[0],c[1],c[2],aw))
     ly=int(H*0.60); grad=Image.new("RGBA",(W,8),(0,0,0,0)); gp=grad.load()
-    spread=ease(max(0,min(1,prog)))
+    spread=ease(max(0,min(1,(prog-0.35)/0.45)))
     for x in range(W):
         d=abs(x-W/2)/(W/2); vis=1 if d<spread else 0; al=int(200*(1-d)**2)*vis
         for yy in range(8): gp[x,yy]=(AGUA[0],AGUA[1],AGUA[2],al if yy in(3,4) else al//3)
-    ov.alpha_composite(grad,(0,ly)); img.alpha_composite(ov); return img.convert("RGB")
+    ov.alpha_composite(grad,(0,ly)); base.alpha_composite(ov); return base.convert("RGB")
 
 def render(escenas, familia, seed, outname, ritmo="sereno", escala_olivo=0.66):
     R=RITMOS[ritmo]

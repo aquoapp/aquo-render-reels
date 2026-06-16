@@ -79,8 +79,22 @@ def dibuja_baseline(draw,x,by,palabra,fnt,fill):
     draw.text((x,by-asc),palabra,font=fnt,fill=fill)
     return draw.textlength(palabra,font=fnt)
 
-def linea_mixta(draw,by,tokens,cx=W//2,gap=14):
-    total=sum(draw.textlength(t[0],font=t[1]) for t in tokens)+(len(tokens)-1)*gap
+MARGEN_SEG=96  # margen seguro por lado; ancho útil = W-2*MARGEN_SEG
+
+def linea_mixta(draw,by,tokens,cx=W//2,gap=14,max_w=None):
+    """Dibuja una línea de tokens centrada en cx sobre la baseline by.
+    AUTOSHRINK (fix 3A): si el ancho total supera max_w (por defecto el ancho
+    útil con márgenes), reduce proporcionalmente el tamaño de las fuentes de la
+    línea hasta que entre. No altera nada cuando el texto ya cabía."""
+    if max_w is None: max_w = W - 2*MARGEN_SEG
+    def _total(tk,g):
+        return sum(draw.textlength(t[0],font=t[1]) for t in tk)+(len(tk)-1)*g
+    total=_total(tokens,gap)
+    if total>max_w and total>0:
+        factor=max_w/total
+        tokens=[(t[0], t[1].font_variant(size=max(1,int(t[1].size*factor))), t[2]) for t in tokens]
+        gap=max(2,int(gap*factor))
+        total=_total(tokens,gap)
     x=cx-total/2
     for txt,fnt,col in tokens: x+=dibuja_baseline(draw,x,by,txt,fnt,col)+gap
 

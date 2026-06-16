@@ -21,6 +21,33 @@ def _colores(familia):
     pleno=MARFIL if familia=="PROFUNDO" else NAVY
     return tenue, pleno
 
+MARGEN_SEG=96  # debe coincidir con aquo_reel.linea_mixta
+
+def _fit_fonts(draw, e, familia, f_reg, f_bold):
+    """Fix 3A para animaciones que dibujan con ancho propio (maquina/suben/deslizan).
+    Calcula el ancho de las 3 líneas con las fuentes nominales; si alguna supera
+    el ancho útil, encoge f_reg y f_bold por el MISMO factor (la línea más ancha
+    manda) para que las 3 queden coherentes y ninguna se salga. Si todo cabía,
+    devuelve las fuentes intactas."""
+    max_w=W-2*MARGEN_SEG
+    w1=draw.textlength(e["l1"],font=f_reg)
+    w2=draw.textlength(e["l2"],font=f_bold)
+    l3_tokens=_tokens3(e["l3"],familia)
+    w3=sum(draw.textlength(tk[0],font=tk[1]) for tk in l3_tokens)+(max(0,len(l3_tokens)-1))*14
+    peor=max(w1,w2,w3)
+    factor=1.0
+    if peor>max_w and peor>0:
+        factor=max_w/peor
+        f_reg=f_reg.font_variant(size=max(1,int(f_reg.size*factor)))
+        f_bold=f_bold.font_variant(size=max(1,int(f_bold.size*factor)))
+    return f_reg, f_bold, factor
+
+def _tokens3_fit(e, familia, factor):
+    """Tokens de la línea 3 con el factor de encogido de la escena aplicado."""
+    toks=_tokens3(e["l3"],familia)
+    if factor>=0.999: return toks
+    return [(t[0], t[1].font_variant(size=max(1,int(t[1].size*factor))), t[2]) for t in toks]
+
 # ── helpers de dibujo con alpha ──────────────────────────────
 def _linea_alpha(draw, by, tokens, alpha, cx=W//2, gap=14):
     a=int(255*ease(max(0,min(1,alpha))))
@@ -35,16 +62,17 @@ def anim_maquina(bg, e, familia, t):
     tenue,pleno=_colores(familia)
     f_reg=font("serif",92,400); f_bold=font("serif",150,700)
     base=960
+    img=bg.copy().convert("RGBA"); ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
+    f_reg,f_bold,_fac=_fit_fonts(draw,e,familia,f_reg,f_bold)
     # texto plano de cada línea
     l1=e["l1"]; l2=e["l2"]
-    l3_tokens=_tokens3(e["l3"],familia)
+    l3_tokens=_tokens3_fit(e,familia,_fac)
     l3_plano="".join(tk[0] for tk in l3_tokens)
     full=l1+l2+l3_plano
     total_chars=len(full)
     # fase de escritura ocupa el 88% del tiempo (más lenta, legible); resto fijo
     write_t=min(1, t/0.88)
     shown=int(total_chars*write_t)
-    img=bg.copy().convert("RGBA"); ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
     # cuántos chars por línea
     n1=min(shown,len(l1)); rem=shown-len(l1)
     n2=max(0,min(rem,len(l2))); rem2=rem-len(l2)
@@ -92,11 +120,12 @@ def anim_suben(bg, e, familia, t):
     f_reg=font("serif",92,400); f_bold=font("serif",150,700)
     base=960
     img=bg.copy().convert("RGBA"); ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
+    f_reg,f_bold,_fac=_fit_fonts(draw,e,familia,f_reg,f_bold)
     # construyo lista de "unidades" (palabra, fuente, color, línea_y)
     unidades=[]
     for w in e["l1"].split(" "): unidades.append((w,f_reg,tenue,base-150))
     for w in e["l2"].split(" "): unidades.append((w,f_bold,pleno,base+20))
-    for txt,fnt,col in _tokens3(e["l3"],familia):
+    for txt,fnt,col in _tokens3_fit(e,familia,_fac):
         for w in txt.split(" "):
             if w: unidades.append((w,fnt,col,base+185))
     n=len(unidades)
@@ -155,6 +184,7 @@ def anim_deslizan(bg, e, familia, t):
     f_reg=font("serif",92,400); f_bold=font("serif",150,700)
     base=960
     img=bg.copy().convert("RGBA"); ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
+    f_reg,f_bold,_fac=_fit_fonts(draw,e,familia,f_reg,f_bold)
     # unidades por línea
     def units_de_linea(ly, tokens):
         us=[]
@@ -164,7 +194,7 @@ def anim_deslizan(bg, e, familia, t):
         return us
     lineas=[units_de_linea(base-150,[(e["l1"],f_reg,tenue)]),
             units_de_linea(base+20,[(e["l2"],f_bold,pleno)]),
-            units_de_linea(base+185,_tokens3(e["l3"],familia))]
+            units_de_linea(base+185,_tokens3_fit(e,familia,_fac))]
     fade_out=min(1,(1-t)/0.16)
     gi=0  # índice global para alternar lado y escalonar
     for items in lineas:

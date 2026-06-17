@@ -100,7 +100,7 @@ def linea_mixta(draw,by,tokens,cx=W//2,gap=14,max_w=None):
 
 def escena(img,l1,l2,l3_tokens,familia="PROFUNDO"):
     draw=ImageDraw.Draw(img)
-    c_tenue=(195,202,210) if familia=="PROFUNDO" else (92,96,82)
+    c_tenue=(195,202,210) if familia=="PROFUNDO" else (74,80,70)
     c_pleno=MARFIL if familia=="PROFUNDO" else NAVY
     f_reg=font("serif",92,400); f_bold=font("serif",150,700)
     base=960

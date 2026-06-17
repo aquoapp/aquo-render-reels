@@ -20,29 +20,38 @@ RITMOS={
   "vivo":    {"dur_esc":2.4,"fade":0.42,"cierre":2.0},
 }
 # Acento de la palabra clave por familia
-ACENTO={"PROFUNDO":(150,160,120), "MARFIL":(90,98,62)}
+ACENTO={"PROFUNDO":(150,160,120), "MARFIL":(74,90,40)}
+
+import re as _re
+_PREFIJO_FORMATO = _re.compile(r'^\s*(REEL|POST|CARRUSEL|STORY|V[IÍ]DEO)\s*[·:\-]\s*', _re.IGNORECASE)
+def _limpia_kicker(l1):
+    """Quita el prefijo de formato del kicker si el guion lo trae (REEL · / POST · …)."""
+    if not l1: return l1
+    return _PREFIJO_FORMATO.sub('', l1).strip()
+
 
 def _parse_linea3(texto):
     """
     La línea 3 lleva la palabra clave entre *asteriscos*: 'un poco *más.*'
-    Devuelve tokens [(texto, italica?, ...)] para el render.
+    Devuelve tokens [(texto, italica?)] para el render.
+    Robusto (fix 4): tolera asteriscos desbalanceados ('*escucharlo.' sin cierre)
+    sin imprimir nunca el '*' crudo; un asterisco abierto se cierra implícitamente
+    al final de la línea.
     """
     partes=[]
     buff=""; ital=False
-    i=0
-    while i < len(texto):
-        if texto[i]=="*":
+    for ch in (texto or ""):
+        if ch=="*":
             if buff: partes.append((buff,ital)); buff=""
-            ital=not ital
+            ital=not ital  # alterna; si queda abierto, lo cerramos abajo
         else:
-            buff+=texto[i]
-        i+=1
+            buff+=ch
     if buff: partes.append((buff,ital))
     return partes
 
 def _tokens3(texto, familia):
     fr=font("serif",92,400); fi=font("serif-it",112,500)
-    c_tenue=(195,202,210) if familia=="PROFUNDO" else (92,96,82)
+    c_tenue=(195,202,210) if familia=="PROFUNDO" else (74,80,70)
     acc=ACENTO[familia]
     out=[]
     for txt,ital in _parse_linea3(texto):
@@ -51,7 +60,7 @@ def _tokens3(texto, familia):
 
 # Margen útil para el TEXTO. Más conservador que el de aquo_reel (96) porque el
 # olivo de las plantillas ocupa la esquina superior; con 120px el texto no lo besa.
-MARGEN_TEXTO = 120
+MARGEN_TEXTO = 150
 
 def _factor_comun(draw, lineas, gap=14):
     """Mira las 3 líneas YA construidas (cada una lista de tokens) y devuelve un
@@ -73,14 +82,14 @@ def _encoge(tokens, factor):
 
 def frame_escena(bg,l1,l2,l3txt,familia,pin,pout):
     img=bg.copy().convert("RGBA"); ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
-    c_tenue=(195,202,210) if familia=="PROFUNDO" else (92,96,82)
+    c_tenue=(195,202,210) if familia=="PROFUNDO" else (74,80,70)
     c_pleno=MARFIL if familia=="PROFUNDO" else NAVY
     f_reg=font("serif",92,400); f_bold=font("serif",150,700)
     bse=960; a=int(255*ease(max(0,min(1,min(pin,pout)))))
     def col(c): return (c[0],c[1],c[2],a)
     dy=int(10*(1-ease(max(0,min(1,pin)))))
     # 1) Construyo las 3 líneas como tokens, ANTES de dibujar.
-    t1=[(l1, f_reg, col(c_tenue))]
+    t1=[(_limpia_kicker(l1), f_reg, col(c_tenue))]
     t2=[(l2, f_bold, col(c_pleno))]
     t3=[(tk[0], tk[1], col(tk[2])) for tk in _tokens3(l3txt,familia)]
     # 2) Un único factor para las tres → jerarquía intacta, nada se sale.
@@ -120,7 +129,7 @@ def frame_cierre(bg,familia,prog):
     ov.alpha_composite(grad,(0,ly)); base.alpha_composite(ov); return base.convert("RGB")
 
 # ── FUNCIÓN PRINCIPAL: crea_reel ─────────────────────────────
-def crea_reel(escenas, salida, familia=None, ritmo=None, seed=None, escala_olivo=0.54, verbose=True):
+def crea_reel(escenas, salida, familia=None, ritmo=None, seed=None, escala_olivo=None, verbose=True):
     """
     escenas: lista de dicts {l1, l2, l3}  (l3 con *palabra clave* entre asteriscos)
     familia: 'PROFUNDO' | 'MARFIL' | None (aleatorio)
@@ -131,6 +140,9 @@ def crea_reel(escenas, salida, familia=None, ritmo=None, seed=None, escala_olivo
     if familia is None: familia=random.choice(["PROFUNDO","MARFIL"])
     if ritmo is None: ritmo=random.choice(list(RITMOS.keys()))
     R=RITMOS[ritmo]
+    if escala_olivo is None:
+        # MARFIL: olivo más recogido para que no caiga sobre el texto. PROFUNDO aguanta más.
+        escala_olivo = 0.46 if familia=="MARFIL" else 0.54
     tmp="_frames_tool"; shutil.rmtree(tmp,ignore_errors=True); os.makedirs(tmp)
     bg=fondo(familia,seed); bg=pon_olivo(bg,familia,escala=escala_olivo)
     n=0; ff=R["fade"]/R["dur_esc"]

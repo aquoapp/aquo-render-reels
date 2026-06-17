@@ -20,6 +20,38 @@ WEBHOOK_ENTREGA = os.environ.get(
 def _log(*a): print("[montaje]", *a, flush=True)
 
 
+def _resuelve_clip(orden):
+    """Devuelve la RUTA LOCAL del clip para capa 2.
+    Dos caminos, sin romper el de banco:
+      · orden['clip']    → nombre de archivo del banco local (clips/ o raíz).
+      · orden['clipUrl'] → vídeo remoto (Grok/Supabase): se descarga a /tmp y
+                            se usa esa ruta. Esto es lo que manda "Vestir de AQUO".
+    Si no viene ninguno → error claro (no un KeyError opaco)."""
+    import urllib.request, tempfile, time
+
+    clip = orden.get("clip")
+    if clip:
+        c1 = os.path.join(MOTOR_DIR, "clips", clip)
+        c2 = os.path.join(MOTOR_DIR, clip)
+        return c1 if os.path.exists(c1) else c2
+
+    clip_url = orden.get("clipUrl") or orden.get("clip_url")
+    if clip_url:
+        dest = os.path.join(tempfile.gettempdir(), f"clip_remoto_{int(time.time())}.mp4")
+        _log("descargando clip remoto:", clip_url)
+        req = urllib.request.Request(clip_url, headers={"User-Agent": "aquo-render/1.0"})
+        with urllib.request.urlopen(req, timeout=120) as r, open(dest, "wb") as fh:
+            fh.write(r.read())
+        sz = os.path.getsize(dest)
+        if sz < 1024:
+            raise RuntimeError(f"el clip remoto pesa {sz} bytes; ¿URL caducada o privada?")
+        _log("clip remoto descargado:", sz, "bytes")
+        return dest
+
+    raise RuntimeError(
+        "capa 2 sin clip: falta 'clip' (banco local) o 'clipUrl' (vídeo remoto)")
+
+
 def monta_reel(orden, salida):
     cwd = os.getcwd()
     os.chdir(MOTOR_DIR)
@@ -29,13 +61,15 @@ def monta_reel(orden, salida):
         ritmo = orden.get("ritmo") or "sereno"
         if capa == 2:
             from capa2_real import crea_reel_metraje
-            c1 = os.path.join(MOTOR_DIR, "clips", orden["clip"])
-            c2 = os.path.join(MOTOR_DIR, orden["clip"])
-            clip_path = c1 if os.path.exists(c1) else c2
+            clip_path = _resuelve_clip(orden)   # acepta clip de banco O clipUrl remoto
+            _es_remoto = bool(orden.get("clipUrl") or orden.get("clip_url")) and not orden.get("clip")
             guion = orden["guion"]
             if isinstance(guion, dict): guion = [guion]
             crea_reel_metraje(clip_path, guion, salida=salida,
                               familia=familia or "PROFUNDO", ritmo=ritmo)
+            if _es_remoto:
+                try: os.remove(clip_path)
+                except OSError: pass
         else:
             from aquo_motor import crea_reel
             crea_reel(orden["guion"], salida=salida,

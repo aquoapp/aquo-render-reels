@@ -49,6 +49,28 @@ def _tokens3(texto, familia):
         out.append((txt, fi if ital else fr, acc if ital else c_tenue))
     return out
 
+# Margen útil para el TEXTO. Más conservador que el de aquo_reel (96) porque el
+# olivo de las plantillas ocupa la esquina superior; con 120px el texto no lo besa.
+MARGEN_TEXTO = 120
+
+def _factor_comun(draw, lineas, gap=14):
+    """Mira las 3 líneas YA construidas (cada una lista de tokens) y devuelve un
+    ÚNICO factor de encogido para todas. Así, si una línea se pasa, las tres
+    bajan de tamaño a la vez y la JERARQUÍA visual se mantiene (la bold sigue
+    siendo más grande que la regular). Devuelve 1.0 si todo ya cabía."""
+    util = W - 2*MARGEN_TEXTO
+    peor = 1.0
+    for tokens in lineas:
+        if not tokens: continue
+        total = sum(draw.textlength(t[0], font=t[1]) for t in tokens) + (len(tokens)-1)*gap
+        if total > util and total > 0:
+            peor = min(peor, util/total)
+    return peor
+
+def _encoge(tokens, factor):
+    if factor >= 0.999 or not tokens: return tokens
+    return [(t[0], t[1].font_variant(size=max(1,int(t[1].size*factor))), t[2]) for t in tokens]
+
 def frame_escena(bg,l1,l2,l3txt,familia,pin,pout):
     img=bg.copy().convert("RGBA"); ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
     c_tenue=(195,202,210) if familia=="PROFUNDO" else (92,96,82)
@@ -57,10 +79,18 @@ def frame_escena(bg,l1,l2,l3txt,familia,pin,pout):
     bse=960; a=int(255*ease(max(0,min(1,min(pin,pout)))))
     def col(c): return (c[0],c[1],c[2],a)
     dy=int(10*(1-ease(max(0,min(1,pin)))))
-    linea_mixta(draw,bse-150+dy,[(l1,f_reg,col(c_tenue))])
-    linea_mixta(draw,bse+20+dy,[(l2,f_bold,col(c_pleno))])
-    l3=[(t[0],t[1],col(t[2])) for t in _tokens3(l3txt,familia)]
-    linea_mixta(draw,bse+185+dy,l3)
+    # 1) Construyo las 3 líneas como tokens, ANTES de dibujar.
+    t1=[(l1, f_reg, col(c_tenue))]
+    t2=[(l2, f_bold, col(c_pleno))]
+    t3=[(tk[0], tk[1], col(tk[2])) for tk in _tokens3(l3txt,familia)]
+    # 2) Un único factor para las tres → jerarquía intacta, nada se sale.
+    factor=_factor_comun(draw,[t1,t2,t3])
+    # 3) Dibujo encogiendo solidariamente. max_w blinda por si una línea concreta
+    #    aún se pasara (defensa en profundidad sobre el autoshrink de linea_mixta).
+    util=W-2*MARGEN_TEXTO
+    linea_mixta(draw,bse-150+dy,_encoge(t1,factor),max_w=util)
+    linea_mixta(draw,bse+20+dy, _encoge(t2,factor),max_w=util)
+    linea_mixta(draw,bse+185+dy,_encoge(t3,factor),max_w=util)
     img.alpha_composite(ov); return img.convert("RGB")
 
 def frame_cierre(bg,familia,prog):

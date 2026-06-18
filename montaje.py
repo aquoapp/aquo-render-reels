@@ -59,6 +59,8 @@ def monta_reel(orden, salida):
         capa = int(orden.get("capa", 1))
         familia = orden.get("familia")
         ritmo = orden.get("ritmo") or "sereno"
+        cierre = orden.get("cierre") or "auto"   # 'MARFIL'|'PROFUNDO'|'auto' (Ana elige el registro del cierre)
+        escala_texto = float(orden.get("escala_texto") or 1.0)   # tamaño de letra elegible (S/M/L)
         if capa == 2:
             from capa2_real import crea_reel_metraje
             clip_path = _resuelve_clip(orden)   # acepta clip de banco O clipUrl remoto
@@ -66,14 +68,14 @@ def monta_reel(orden, salida):
             guion = orden["guion"]
             if isinstance(guion, dict): guion = [guion]
             crea_reel_metraje(clip_path, guion, salida=salida,
-                              familia=familia or "PROFUNDO", ritmo=ritmo)
+                              familia=familia or "PROFUNDO", ritmo=ritmo, cierre=cierre)
             if _es_remoto:
                 try: os.remove(clip_path)
                 except OSError: pass
         else:
             from aquo_motor import crea_reel
             crea_reel(orden["guion"], salida=salida,
-                      familia=familia, ritmo=ritmo, seed=orden.get("seed"))
+                      familia=familia, ritmo=ritmo, seed=orden.get("seed"), cierre=cierre, escala_texto=escala_texto)
     finally:
         os.chdir(cwd)
     return salida

@@ -57,7 +57,7 @@ def texto_overlay(l1,l2,l3,familia,alpha=255):
     linea_mixta(draw,bse+185,l3t)
     return ov
 
-def crea_reel_metraje(clip_in, guion, salida, familia="PROFUNDO", ritmo="sereno"):
+def crea_reel_metraje(clip_in, guion, salida, familia="PROFUNDO", ritmo="sereno", cierre="auto"):
     """Reel de capa 2: clip real recortado + capa de marca encima."""
     vert="_vert.mp4"; recorta_vertical(clip_in, vert)
     # extraigo TODOS los frames del clip vertical
@@ -84,7 +84,7 @@ def crea_reel_metraje(clip_in, guion, salida, familia="PROFUNDO", ritmo="sereno"
     for i in range(int(R["cierre"]*FPS)):
         t=i/(R["cierre"]*FPS)
         bg=last.copy(); bg.alpha_composite(velo)
-        bg=frame_cierre(bg.convert("RGB"),familia,min(1,t/0.4)).convert("RGBA")
+        bg=frame_cierre(bg.convert("RGB"),familia,min(1,t/0.4),cierre=cierre).convert("RGBA")
         bg.convert("RGB").save(f"{out}/f{n:04d}.png"); n+=1
     subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-framerate",str(FPS),
                     "-i",f"{out}/f%04d.png","-c:v","libx264","-pix_fmt","yuv420p","-crf","19",

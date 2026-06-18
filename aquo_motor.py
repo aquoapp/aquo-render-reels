@@ -49,8 +49,9 @@ def _parse_linea3(texto):
     if buff: partes.append((buff,ital))
     return partes
 
-def _tokens3(texto, familia):
-    fr=font("serif",92,400); fi=font("serif-it",112,500)
+def _tokens3(texto, familia, escala_texto=1.0):
+    et=max(0.7, min(1.4, escala_texto or 1.0))
+    fr=font("serif",int(92*et),400); fi=font("serif-it",int(112*et),500)
     c_tenue=(195,202,210) if familia=="PROFUNDO" else (74,80,70)
     acc=ACENTO[familia]
     out=[]
@@ -80,18 +81,20 @@ def _encoge(tokens, factor):
     if factor >= 0.999 or not tokens: return tokens
     return [(t[0], t[1].font_variant(size=max(1,int(t[1].size*factor))), t[2]) for t in tokens]
 
-def frame_escena(bg,l1,l2,l3txt,familia,pin,pout):
+def frame_escena(bg,l1,l2,l3txt,familia,pin,pout,escala_texto=1.0):
     img=bg.copy().convert("RGBA"); ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
     c_tenue=(195,202,210) if familia=="PROFUNDO" else (74,80,70)
     c_pleno=MARFIL if familia=="PROFUNDO" else NAVY
-    f_reg=font("serif",92,400); f_bold=font("serif",150,700)
+    # escala_texto: 1.0 = tamaño base. <1 más pequeño, >1 más grande (elegible por Ana).
+    et=max(0.7, min(1.4, escala_texto or 1.0))
+    f_reg=font("serif",int(92*et),400); f_bold=font("serif",int(150*et),700)
     bse=960; a=int(255*ease(max(0,min(1,min(pin,pout)))))
     def col(c): return (c[0],c[1],c[2],a)
     dy=int(10*(1-ease(max(0,min(1,pin)))))
     # 1) Construyo las 3 líneas como tokens, ANTES de dibujar.
     t1=[(_limpia_kicker(l1), f_reg, col(c_tenue))]
     t2=[(l2, f_bold, col(c_pleno))]
-    t3=[(tk[0], tk[1], col(tk[2])) for tk in _tokens3(l3txt,familia)]
+    t3=[(tk[0], tk[1], col(tk[2])) for tk in _tokens3(l3txt,familia,escala_texto=et)]
     # 2) Un único factor para las tres → jerarquía intacta, nada se sale.
     factor=_factor_comun(draw,[t1,t2,t3])
     # 3) Dibujo encogiendo solidariamente. max_w blinda por si una línea concreta
@@ -102,20 +105,24 @@ def frame_escena(bg,l1,l2,l3txt,familia,pin,pout):
     linea_mixta(draw,bse+185+dy,_encoge(t3,factor),max_w=util)
     img.alpha_composite(ov); return img.convert("RGB")
 
-def frame_cierre(bg,familia,prog):
+def frame_cierre(bg,familia,prog,cierre="auto"):
     """Cierre de marca AQUO con TRANSICIÓN de familia.
-    El fondo de la escena vira suavemente hacia el registro OPUESTO
-    (PROFUNDO→MARFIL o MARFIL→PROFUNDO) como gesto de firma; sobre ese
-    fondo ya virado se posa el wordmark AQUO + la línea de luz agua.
-    Firma intacta (bg,familia,prog): ningún consumidor se rompe."""
+    cierre: 'MARFIL' | 'PROFUNDO' | 'auto'.
+      · 'auto' (por defecto): vira al registro OPUESTO a la escena (gesto de firma clásico).
+      · 'MARFIL'/'PROFUNDO': Ana elige el registro final del cierre, sin importar la familia
+        de las escenas. Si coincide con la familia, no hay viraje (cierre del mismo tono).
+    Firma retrocompatible: quien no pase 'cierre' obtiene el comportamiento de siempre."""
     prog=max(0,min(1,prog))
-    op = "MARFIL" if familia=="PROFUNDO" else "PROFUNDO"
-    # 1) VIRAJE de fondo: escena -> fondo de la familia opuesta (primer 55% del cierre)
-    bg_op=fondo(op, 7)  # fondo limpio del registro opuesto (sin olivo: cierre sobrio)
+    if cierre in ("MARFIL","PROFUNDO"):
+        op = cierre
+    else:
+        op = "MARFIL" if familia=="PROFUNDO" else "PROFUNDO"
+    # 1) VIRAJE de fondo: escena -> fondo del registro de cierre (primer 55% del cierre)
+    bg_op=fondo(op, 7)  # fondo limpio del registro de cierre (sin olivo: cierre sobrio)
     vira=ease(min(1, prog/0.55))
     base=Image.blend(bg.convert("RGB"), bg_op, vira).convert("RGBA")
     ov=Image.new("RGBA",(W,H),(0,0,0,0)); draw=ImageDraw.Draw(ov)
-    # 2) WORDMARK: color correcto para el fondo FINAL (el opuesto)
+    # 2) WORDMARK: color correcto para el fondo FINAL (el registro de cierre)
     c = MARFIL if op=="PROFUNDO" else NAVY
     aw=int(255*ease(max(0, min(1, (prog-0.35)/0.45))))  # entra tras iniciar el viraje
     f=font("display",130,800); w=draw.textlength("AQUO",font=f); asc,_=f.getmetrics()
@@ -129,12 +136,13 @@ def frame_cierre(bg,familia,prog):
     ov.alpha_composite(grad,(0,ly)); base.alpha_composite(ov); return base.convert("RGB")
 
 # ── FUNCIÓN PRINCIPAL: crea_reel ─────────────────────────────
-def crea_reel(escenas, salida, familia=None, ritmo=None, seed=None, escala_olivo=None, verbose=True):
+def crea_reel(escenas, salida, familia=None, ritmo=None, seed=None, escala_olivo=None, cierre="auto", escala_texto=1.0, verbose=True):
     """
     escenas: lista de dicts {l1, l2, l3}  (l3 con *palabra clave* entre asteriscos)
     familia: 'PROFUNDO' | 'MARFIL' | None (aleatorio)
     ritmo:   'calmado' | 'sereno' | 'vivo' | None (aleatorio)
     seed:    int | None (aleatorio → fondo distinto cada vez)
+    cierre:  'MARFIL'|'PROFUNDO'|'auto' — registro del cierre de marca (auto=opuesto a la escena)
     """
     if seed is None: seed=random.randint(1,9999)
     if familia is None: familia=random.choice(["PROFUNDO","MARFIL"])
@@ -150,9 +158,9 @@ def crea_reel(escenas, salida, familia=None, ritmo=None, seed=None, escala_olivo
         nf=int(R["dur_esc"]*FPS)
         for i in range(nf):
             t=i/nf; pin=min(1,t/ff); pout=min(1,(1-t)/ff)
-            frame_escena(bg,e["l1"],e["l2"],e["l3"],familia,pin,pout).save(f"{tmp}/f{n:04d}.png"); n+=1
+            frame_escena(bg,e["l1"],e["l2"],e["l3"],familia,pin,pout,escala_texto=escala_texto).save(f"{tmp}/f{n:04d}.png"); n+=1
     for i in range(int(R["cierre"]*FPS)):
-        t=i/(R["cierre"]*FPS); frame_cierre(bg,familia,min(1,t/0.4)).save(f"{tmp}/f{n:04d}.png"); n+=1
+        t=i/(R["cierre"]*FPS); frame_cierre(bg,familia,min(1,t/0.4),cierre=cierre).save(f"{tmp}/f{n:04d}.png"); n+=1
     subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-framerate",str(FPS),
                     "-i",f"{tmp}/f%04d.png","-c:v","libx264","-pix_fmt","yuv420p","-crf","18",
                     "-movflags","+faststart",salida],check=True)

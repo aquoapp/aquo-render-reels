@@ -20,18 +20,38 @@ def detecta_area_util(frame_path):
         if brillo_col(x)>200: right=x; break
     return left,right,w,h
 
+def _dim_clip(clip_in):
+    """Ancho y alto reales del clip via ffprobe."""
+    out=subprocess.run(["ffprobe","-v","error","-select_streams","v:0",
+                        "-show_entries","stream=width,height","-of","csv=p=0",clip_in],
+                       capture_output=True,text=True,check=True).stdout.strip()
+    w,h=out.split(",")[:2]
+    return int(w),int(h)
+
 def recorta_vertical(clip_in, clip_out):
-    """Recorta el clip a 1080x1920 (9:16) centrado en el área útil."""
-    subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-ss","1","-i",clip_in,
-                    "-frames:v","1","_probe_c2.png"],check=True)
-    left,right,w,h=detecta_area_util("_probe_c2.png")
-    cx=(left+right)//2
-    crop_w=int(h*9/16)              # ancho 9:16 para esta altura
-    x0=max(0,min(w-crop_w, cx-crop_w//2))
-    # recorto a 9:16 y escalo a 1080x1920
+    """Lleva CUALQUIER clip a 1080x1920 (9:16) sin romperse.
+    - Calcula el recorte por la proporción REAL del clip (no por brillo).
+    - Si el clip ya es 9:16 (o más estrecho), no recorta de más: escala directo.
+    - El crop SIEMPRE queda dentro de las dimensiones reales (clamp), así que
+      ffmpeg nunca recibe un tamaño imposible."""
+    TARGET = 9/16  # ancho/alto objetivo
+    w,h = _dim_clip(clip_in)
+    ar = w/h
+    if abs(ar - TARGET) < 0.02:
+        # ya es 9:16 → solo escalar
+        vf = f"scale={W}:{H}"
+    elif ar > TARGET:
+        # más ancho que 9:16 → recorto los lados, centrado
+        crop_w = min(w, int(round(h*TARGET)))
+        x0 = max(0, (w-crop_w)//2)
+        vf = f"crop={crop_w}:{h}:{x0}:0,scale={W}:{H}"
+    else:
+        # más estrecho que 9:16 → recorto arriba/abajo, centrado
+        crop_h = min(h, int(round(w/TARGET)))
+        y0 = max(0, (h-crop_h)//2)
+        vf = f"crop={w}:{crop_h}:0:{y0},scale={W}:{H}"
     subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-i",clip_in,
-                    "-vf",f"crop={crop_w}:{h}:{x0}:0,scale={W}:{H}",
-                    "-an","-c:v","libx264","-pix_fmt","yuv420p","-crf","18",clip_out],check=True)
+                    "-vf",vf,"-an","-c:v","libx264","-pix_fmt","yuv420p","-crf","18",clip_out],check=True)
     return clip_out
 
 def _velo(familia):

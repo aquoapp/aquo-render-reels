@@ -135,6 +135,57 @@ def genera_clip(orden, medidor=None):
     return video_url
 
 
+def sugiere_segunda_escena(concepto1, guion=None):
+    """Cuando Ana solo da la escena 1, pide a Grok (texto) una escena 2 visual
+    COHERENTE con la primera y con el guion, en el mundo estético de AQUO.
+    Devuelve un string (concepto2) o None si no se pudo. Coste ínfimo.
+    Usa la misma XAI_API_KEY (chat/completions), sin variables nuevas."""
+    if not API_KEY:
+        return None
+    # Resumen del guion para dar contexto al modelo
+    texto_guion = ""
+    if guion:
+        try:
+            texto_guion = " · ".join(
+                " ".join(filter(None, [e.get("l1"), e.get("l2"), e.get("l3","").replace("*","")]))
+                for e in (guion if isinstance(guion, list) else [guion])
+            )[:300]
+        except Exception:
+            texto_guion = ""
+    sistema = (
+        "Eres directora de arte de AQUO, marca mediterránea de bienestar (estética editorial, "
+        "quiet luxury, paleta navy/marfil/arena/oliva, serena, sin personas, sin texto). "
+        "Te doy la PRIMERA escena visual de un reel y debes proponer una SEGUNDA escena distinta "
+        "pero del mismo mundo, que combine bien y dé continuidad sin repetir. "
+        "Responde SOLO con la descripción de la segunda escena en una frase, en inglés, "
+        "sin comillas ni preámbulo. Sin personas, sin caras, sin texto, sin logos.")
+    usuario = f"Primera escena: {concepto1}."
+    if texto_guion:
+        usuario += f" Mensaje del reel: {texto_guion}."
+    usuario += " Dame la segunda escena."
+
+    payload = json.dumps({
+        "model": os.environ.get("GROK_MODELO_TEXTO", "grok-4.3"),
+        "messages": [
+            {"role": "system", "content": sistema},
+            {"role": "user", "content": usuario},
+        ],
+        "temperature": 0.8,
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(f"{BASE}/chat/completions", data=payload,
+                                     method="POST", headers=_headers())
+        with urllib.request.urlopen(req, timeout=40) as r:
+            data = json.loads(r.read())
+        txt = data["choices"][0]["message"]["content"].strip().strip('"').strip()
+        if txt:
+            _log("escena 2 sugerida por IA:", txt[:80])
+            return txt
+    except Exception as e:
+        _log("no se pudo sugerir escena 2 (sigo con 1):", repr(e))
+    return None
+
+
 def genera_clips(orden, medidor=None):
     """Capa 3 multi-clip: genera N clips (uno por 'concepto' de la lista).
     Devuelve una LISTA de URLs (las que se hayan podido generar).
@@ -159,6 +210,17 @@ def genera_clips(orden, medidor=None):
         conceptos = [c] if c else []
     if not imagenes and orden.get("imagen_url"):
         imagenes = [orden.get("imagen_url")]
+
+    # ── Inteligencia: si solo hay 1 concepto pero el guion tiene varias escenas,
+    #    pido a la IA una segunda escena coherente (a menos que se desactive). ──
+    auto2 = orden.get("auto_escena2", True)
+    guion = orden.get("guion")
+    nesc_guion = len(guion) if isinstance(guion, list) else 1
+    if auto2 and len(conceptos) == 1 and not imagenes and nesc_guion >= 2:
+        c2 = sugiere_segunda_escena(conceptos[0], guion)
+        if c2:
+            conceptos = [conceptos[0], c2]
+            _log("completada escena 2 automáticamente para no enganchar")
 
     n = max(len(conceptos), len(imagenes), 1)
     urls = []

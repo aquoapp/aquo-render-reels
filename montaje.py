@@ -35,9 +35,8 @@ def _resuelve_clip(orden):
         c2 = os.path.join(MOTOR_DIR, clip)
         return c1 if os.path.exists(c1) else c2
 
-    clip_url = orden.get("clipUrl") or orden.get("clip_url")
-    if clip_url:
-        dest = os.path.join(tempfile.gettempdir(), f"clip_remoto_{int(time.time())}.mp4")
+    def _descarga(clip_url):
+        dest = os.path.join(tempfile.gettempdir(), f"clip_remoto_{int(time.time()*1000)}.mp4")
         _log("descargando clip remoto:", clip_url)
         req = urllib.request.Request(clip_url, headers={"User-Agent": "aquo-render/1.0"})
         with urllib.request.urlopen(req, timeout=120) as r, open(dest, "wb") as fh:
@@ -48,8 +47,17 @@ def _resuelve_clip(orden):
         _log("clip remoto descargado:", sz, "bytes")
         return dest
 
+    # Varios clips remotos (capa 3 multi-clip de Grok)
+    clips_remotos = orden.get("clips_remotos")
+    if clips_remotos:
+        return [_descarga(u) for u in clips_remotos]
+
+    clip_url = orden.get("clipUrl") or orden.get("clip_url")
+    if clip_url:
+        return _descarga(clip_url)
+
     raise RuntimeError(
-        "capa 2 sin clip: falta 'clip' (banco local) o 'clipUrl' (vídeo remoto)")
+        "capa 2 sin clip: falta 'clip' (banco local) o 'clipUrl'/'clips_remotos' (vídeo remoto)")
 
 
 def monta_reel(orden, salida):
@@ -63,15 +71,16 @@ def monta_reel(orden, salida):
         escala_texto = float(orden.get("escala_texto") or 1.0)   # tamaño de letra elegible (S/M/L)
         if capa == 2:
             from capa2_real import crea_reel_metraje
-            clip_path = _resuelve_clip(orden)   # acepta clip de banco O clipUrl remoto
-            _es_remoto = bool(orden.get("clipUrl") or orden.get("clip_url")) and not orden.get("clip")
+            clip_path = _resuelve_clip(orden)   # str (1 clip) o list (varios)
+            _es_remoto = bool(orden.get("clips_remotos") or orden.get("clipUrl") or orden.get("clip_url")) and not orden.get("clip")
             guion = orden["guion"]
             if isinstance(guion, dict): guion = [guion]
             crea_reel_metraje(clip_path, guion, salida=salida,
                               familia=familia or "PROFUNDO", ritmo=ritmo, cierre=cierre)
             if _es_remoto:
-                try: os.remove(clip_path)
-                except OSError: pass
+                for p in (clip_path if isinstance(clip_path, list) else [clip_path]):
+                    try: os.remove(p)
+                    except OSError: pass
         else:
             from aquo_motor import crea_reel
             crea_reel(orden["guion"], salida=salida,
@@ -137,20 +146,22 @@ def trabajo(orden):
         # ── Medidor de costes de ESTA generación (todos los proveedores) ──
         from costes import Medidor
         medidor = Medidor()
-        # ── Capa 3: clip a medida con Grok ANTES de montar. Si falla, cae al banco. ──
+        # ── Capa 3: clip(s) a medida con Grok ANTES de montar. Si falla, cae al banco. ──
         if int(orden.get("capa", 1)) == 3:
             try:
-                from grok_clip import genera_clip
-                _log("capa 3: generando clip con Grok...")
-                clip_url = genera_clip(orden, medidor=medidor)
-                orden["clipUrl"] = clip_url   # entra por la puerta de capa 2
-                orden["capa"] = 2             # a partir de aquí, se monta como metraje
-                _log("capa 3: clip Grok listo, montando como capa 2")
+                from grok_clip import genera_clips
+                _log("capa 3: generando clips con Grok...")
+                urls = genera_clips(orden, medidor=medidor)
+                if not urls:
+                    raise RuntimeError("Grok no devolvió ningún clip")
+                orden["clips_remotos"] = urls   # lista → capa 2 reparte escenas
+                orden["capa"] = 2
+                _log(f"capa 3: {len(urls)} clip(s) Grok listo(s), montando como capa 2")
             except Exception as e:
                 _log("capa 3 falló, caigo al banco:", repr(e))
                 orden["capa"] = 2
+                orden.pop("clips_remotos", None)
                 orden.pop("clipUrl", None)
-                # respaldo: un clip del banco (mar en calma) para no quedarse sin reel
                 orden["clip"] = orden.get("clip_respaldo") or "c13_marmol_mar.mp4"
         monta_reel(orden, out)
         _log("montado", os.path.getsize(out), "bytes")

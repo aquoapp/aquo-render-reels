@@ -78,29 +78,51 @@ def texto_overlay(l1,l2,l3,familia,alpha=255):
     return ov
 
 def crea_reel_metraje(clip_in, guion, salida, familia="PROFUNDO", ritmo="sereno", cierre="auto"):
-    """Reel de capa 2: clip real recortado + capa de marca encima."""
-    vert="_vert.mp4"; recorta_vertical(clip_in, vert)
-    # extraigo TODOS los frames del clip vertical
-    tmp="_c2real"; shutil.rmtree(tmp,ignore_errors=True); os.makedirs(tmp)
-    subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-i",vert,
-                    "-vf",f"fps={FPS}",f"{tmp}/bg%04d.png"],check=True)
-    bgs=sorted([f for f in os.listdir(tmp) if f.startswith("bg")])
-    nbg=len(bgs)
+    """Reel de capa 2: clip(s) real(es) recortado(s) + capa de marca encima.
+    clip_in puede ser:
+      · una ruta (str) → un solo clip bajo todas las escenas (comportamiento clásico).
+      · una lista de rutas → se reparten las escenas entre los clips, de modo que
+        cada bloque de mensaje cae sobre un clip distinto y el reel NO se engancha.
+    Cada escena consume frames de SU clip empezando por el principio (sin bucle visible
+    salvo que la escena dure más que el clip)."""
+    clips = clip_in if isinstance(clip_in, (list, tuple)) else [clip_in]
+    clips = [c for c in clips if c]  # quita vacíos
+    if not clips:
+        raise RuntimeError("crea_reel_metraje: sin clips")
+
+    # Recorto cada clip a vertical y extraigo sus frames a una carpeta propia.
     velo=_velo(familia)
-    R=RITMOS[ritmo]; ff=R["fade"]/R["dur_esc"]; n=0
-    out="_c2out"; shutil.rmtree(out,ignore_errors=True); os.makedirs(out)
-    # una escena de texto por clip (el metraje manda el largo); loop del bg si hace falta
+    R=RITMOS[ritmo]; ff=R["fade"]/R["dur_esc"]
     nf_total=int(R["dur_esc"]*FPS)
-    for e in guion:
+    bancos=[]   # lista de (carpeta, lista_de_frames)
+    verts=[]
+    for idx, c in enumerate(clips):
+        vert=f"_vert{idx}.mp4"; recorta_vertical(c, vert); verts.append(vert)
+        tdir=f"_c2real{idx}"; shutil.rmtree(tdir,ignore_errors=True); os.makedirs(tdir)
+        subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-i",vert,
+                        "-vf",f"fps={FPS}",f"{tdir}/bg%04d.png"],check=True)
+        fr=sorted([f for f in os.listdir(tdir) if f.startswith("bg")])
+        bancos.append((tdir, fr))
+
+    out="_c2out"; shutil.rmtree(out,ignore_errors=True); os.makedirs(out)
+    n=0
+    # Reparto: a la escena k le toca el clip k repartido entre los disponibles.
+    nesc=len(guion)
+    for k, e in enumerate(guion):
+        # mapeo escena→clip: reparte las escenas de forma uniforme entre los clips
+        ci = (k * len(bancos)) // max(1, nesc)
+        ci = min(ci, len(bancos)-1)
+        tdir, fr = bancos[ci]; nbg=len(fr)
         for i in range(nf_total):
             t=i/nf_total
-            bg=Image.open(f"{tmp}/{bgs[n % nbg]}").convert("RGBA")
+            bg=Image.open(f"{tdir}/{fr[i % nbg]}").convert("RGBA")
             bg.alpha_composite(velo)
             a=int(255*ease(max(0,min(1,min(t/ff,(1-t)/ff)))))
             bg.alpha_composite(texto_overlay(e["l1"],e["l2"],e["l3"],familia,a))
             bg.convert("RGB").save(f"{out}/f{n:04d}.png"); n+=1
-    # cierre: último frame del clip congelado + marca
-    last=Image.open(f"{tmp}/{bgs[min(n,nbg)-1]}").convert("RGBA")
+    # cierre: último frame del último clip usado + marca
+    tdir_last, fr_last = bancos[-1]
+    last=Image.open(f"{tdir_last}/{fr_last[-1]}").convert("RGBA")
     for i in range(int(R["cierre"]*FPS)):
         t=i/(R["cierre"]*FPS)
         bg=last.copy(); bg.alpha_composite(velo)
@@ -109,6 +131,9 @@ def crea_reel_metraje(clip_in, guion, salida, familia="PROFUNDO", ritmo="sereno"
     subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-framerate",str(FPS),
                     "-i",f"{out}/f%04d.png","-c:v","libx264","-pix_fmt","yuv420p","-crf","19",
                     "-movflags","+faststart",salida],check=True)
-    shutil.rmtree(tmp,ignore_errors=True); shutil.rmtree(out,ignore_errors=True)
-    os.remove(vert)
+    for tdir,_ in bancos: shutil.rmtree(tdir,ignore_errors=True)
+    shutil.rmtree(out,ignore_errors=True)
+    for v in verts:
+        try: os.remove(v)
+        except OSError: pass
     print(f"✓ {salida}")

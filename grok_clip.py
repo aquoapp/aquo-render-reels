@@ -133,3 +133,45 @@ def genera_clip(orden, medidor=None):
     video_url, segs = anima_imagen(imagen_url, movimiento, duracion)
     if medidor: medidor.grok_video(segs)
     return video_url
+
+
+def genera_clips(orden, medidor=None):
+    """Capa 3 multi-clip: genera N clips (uno por 'concepto' de la lista).
+    Devuelve una LISTA de URLs (las que se hayan podido generar).
+
+    Campos de la orden:
+      · conceptos  : lista de descripciones, una por clip (modo A). Si no viene,
+                     usa [concepto] (compatibilidad con un solo clip).
+      · movimientos: lista opcional de movimientos, emparejada con conceptos.
+      · imagenes_url: lista opcional de imágenes tuyas (modo B), una por clip.
+      · duracion   : segundos por clip (def 6).
+
+    Degradación: si un clip falla, se omite y se sigue con los demás. Si NINGUNO
+    sale, devuelve [] y el motor caerá al banco."""
+    duracion = int(orden.get("duracion") or 6)
+    conceptos = orden.get("conceptos")
+    movimientos = orden.get("movimientos") or []
+    imagenes = orden.get("imagenes_url") or []
+
+    # Normalizo a listas de igual criterio (compatibilidad con campo singular)
+    if not conceptos:
+        c = orden.get("concepto")
+        conceptos = [c] if c else []
+    if not imagenes and orden.get("imagen_url"):
+        imagenes = [orden.get("imagen_url")]
+
+    n = max(len(conceptos), len(imagenes), 1)
+    urls = []
+    for i in range(n):
+        sub = {
+            "concepto": conceptos[i] if i < len(conceptos) else (conceptos[-1] if conceptos else None),
+            "movimiento": movimientos[i] if i < len(movimientos) else orden.get("movimiento"),
+            "imagen_url": imagenes[i] if i < len(imagenes) else None,
+            "duracion": duracion,
+        }
+        try:
+            urls.append(genera_clip(sub, medidor=medidor))
+            _log(f"clip {i+1}/{n} listo")
+        except Exception as e:
+            _log(f"clip {i+1}/{n} falló, lo omito:", repr(e))
+    return urls

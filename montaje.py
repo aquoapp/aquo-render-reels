@@ -136,16 +136,29 @@ def trabajo(orden):
         _log("montando", pieza, "capa", orden.get("capa", 1))
         monta_reel(orden, out)
         _log("montado", os.path.getsize(out), "bytes")
+        # ── Medidor de costes de ESTA generación (todos los proveedores) ──
+        from costes import Medidor
+        medidor = Medidor()
+        # Si en el futuro la capa de metraje genera un clip con Grok, aquí se
+        # llamaría medidor.grok_imagen()/medidor.grok_video() con los datos reales.
         # ── Capa de narración IRIS (opcional, aislada): solo si el panel la pidió ──
         vz = orden.get("voz_iris")
         if vz and vz.get("activar"):
             try:
                 from voz_iris import aplica_narracion
                 _log("aplicando narración IRIS...")
-                out = aplica_narracion(out, vz.get("texto", ""))
+                out, n_chars = aplica_narracion(out, vz.get("texto", ""))
                 nombre = os.path.basename(out)   # el nombre puede cambiar a _voz.mp4
+                if n_chars > 0:
+                    medidor.voz_elevenlabs(n_chars)
             except Exception as e:
                 _log("capa de voz no disponible (reel sale mudo):", repr(e))
+        caption = caption + medidor.bloque_telegram()
+        _log("coste generación:", medidor.total_eur(), "EUR")
+        try:
+            medidor.registra_supabase(pieza)
+        except Exception as e:
+            _log("registro de coste falló (no crítico):", repr(e))
         _log("subiendo a Supabase...")
         url = sube_a_supabase(out, nombre)
         _log("en Supabase:", url)

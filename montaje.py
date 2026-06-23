@@ -136,6 +136,16 @@ def trabajo(orden):
         _log("montando", pieza, "capa", orden.get("capa", 1))
         monta_reel(orden, out)
         _log("montado", os.path.getsize(out), "bytes")
+        # ── Capa de narración IRIS (opcional, aislada): solo si el panel la pidió ──
+        vz = orden.get("voz_iris")
+        if vz and vz.get("activar"):
+            try:
+                from voz_iris import aplica_narracion
+                _log("aplicando narración IRIS...")
+                out = aplica_narracion(out, vz.get("texto", ""))
+                nombre = os.path.basename(out)   # el nombre puede cambiar a _voz.mp4
+            except Exception as e:
+                _log("capa de voz no disponible (reel sale mudo):", repr(e))
         _log("subiendo a Supabase...")
         url = sube_a_supabase(out, nombre)
         _log("en Supabase:", url)

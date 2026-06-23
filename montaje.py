@@ -160,12 +160,18 @@ def trabajo(orden):
             try:
                 from voz_iris import aplica_narracion
                 _log("aplicando narración IRIS...")
-                out, n_chars = aplica_narracion(out, vz.get("texto", ""))
+                _res = aplica_narracion(out, vz.get("texto", ""))
+                # Tolerante: la función puede devolver (ruta, n_chars) o solo ruta.
+                if isinstance(_res, tuple):
+                    out, n_chars = _res[0], (_res[1] if len(_res) > 1 else 0)
+                else:
+                    out, n_chars = _res, len((vz.get("texto") or "").strip())
                 nombre = os.path.basename(out)   # el nombre puede cambiar a _voz.mp4
-                if n_chars > 0:
+                if n_chars and n_chars > 0:
                     medidor.voz_elevenlabs(n_chars)
+                    _log("narración IRIS OK:", n_chars, "caracteres")
             except Exception as e:
-                _log("capa de voz no disponible (reel sale mudo):", repr(e))
+                _log("narración IRIS falló (reel saldrá mudo):", repr(e))
         caption = caption + medidor.bloque_telegram()
         _log("coste generación:", medidor.total_eur(), "EUR")
         try:

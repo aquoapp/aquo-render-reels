@@ -91,11 +91,12 @@ def _mezcla(video_mudo, voz_mp3, salida):
 
 
 def aplica_narracion(video_path, texto):
-    """Punto de entrada. Devuelve la RUTA del vídeo final.
+    """Punto de entrada. Devuelve (ruta_video_final, n_caracteres).
 
-    - Si la narración se genera y mezcla bien → ruta del MP4 con voz.
-    - Si algo falla → devuelve el video_path original (mudo), sin romper nada.
+    - Si la narración se genera y mezcla bien → (MP4 con voz, nº de caracteres narrados).
+    - Si algo falla → (video_path original mudo, 0), sin romper nada.
     """
+    n_chars = len((texto or "").strip())
     try:
         tmp_mp3 = os.path.join(tempfile.gettempdir(), f"iris_voz_{int(time.time())}.mp3")
         _genera_voz(texto, tmp_mp3)
@@ -106,14 +107,14 @@ def aplica_narracion(video_path, texto):
         try: os.remove(tmp_mp3)
         except OSError: pass
         _log("narración aplicada:", os.path.basename(salida),
-             f"(vídeo {_dur(video_path):.1f}s)")
-        return salida
+             f"(vídeo {_dur(video_path):.1f}s · {n_chars} caracteres)")
+        return salida, n_chars
     except urllib.error.HTTPError as e:
         cuerpo = ""
         try: cuerpo = e.read().decode("utf-8", "ignore")[:200]
         except Exception: pass
         _log("ElevenLabs HTTP", e.code, "-> reel sin voz.", cuerpo)
-        return video_path
+        return video_path, 0
     except Exception as e:
         _log("narración no aplicada (reel sale mudo):", repr(e))
-        return video_path
+        return video_path, 0

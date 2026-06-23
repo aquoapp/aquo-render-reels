@@ -134,13 +134,26 @@ def trabajo(orden):
         nombre = f"{pieza}.mp4"
         out = os.path.join(tempfile.gettempdir(), nombre)
         _log("montando", pieza, "capa", orden.get("capa", 1))
-        monta_reel(orden, out)
-        _log("montado", os.path.getsize(out), "bytes")
         # ── Medidor de costes de ESTA generación (todos los proveedores) ──
         from costes import Medidor
         medidor = Medidor()
-        # Si en el futuro la capa de metraje genera un clip con Grok, aquí se
-        # llamaría medidor.grok_imagen()/medidor.grok_video() con los datos reales.
+        # ── Capa 3: clip a medida con Grok ANTES de montar. Si falla, cae al banco. ──
+        if int(orden.get("capa", 1)) == 3:
+            try:
+                from grok_clip import genera_clip
+                _log("capa 3: generando clip con Grok...")
+                clip_url = genera_clip(orden, medidor=medidor)
+                orden["clipUrl"] = clip_url   # entra por la puerta de capa 2
+                orden["capa"] = 2             # a partir de aquí, se monta como metraje
+                _log("capa 3: clip Grok listo, montando como capa 2")
+            except Exception as e:
+                _log("capa 3 falló, caigo al banco:", repr(e))
+                orden["capa"] = 2
+                orden.pop("clipUrl", None)
+                # respaldo: un clip del banco (mar en calma) para no quedarse sin reel
+                orden["clip"] = orden.get("clip_respaldo") or "c13_marmol_mar.mp4"
+        monta_reel(orden, out)
+        _log("montado", os.path.getsize(out), "bytes")
         # ── Capa de narración IRIS (opcional, aislada): solo si el panel la pidió ──
         vz = orden.get("voz_iris")
         if vz and vz.get("activar"):

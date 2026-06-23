@@ -155,10 +155,14 @@ def sugiere_segunda_escena(concepto1, guion=None):
     sistema = (
         "Eres directora de arte de AQUO, marca mediterránea de bienestar (estética editorial, "
         "quiet luxury, paleta navy/marfil/arena/oliva, serena, sin personas, sin texto). "
-        "Te doy la PRIMERA escena visual de un reel y debes proponer una SEGUNDA escena distinta "
-        "pero del mismo mundo, que combine bien y dé continuidad sin repetir. "
-        "Responde SOLO con la descripción de la segunda escena en una frase, en inglés, "
-        "sin comillas ni preámbulo. Sin personas, sin caras, sin texto, sin logos.")
+        "Te doy la PRIMERA escena visual de un reel y debes proponer una SEGUNDA escena que "
+        "CONTRASTE claramente con la primera para que el reel cambie de verdad, manteniendo el "
+        "mismo mundo de marca. Reglas de contraste: si la 1 es un interior, la 2 es un exterior "
+        "(o al revés); si la 1 es un plano amplio, la 2 es un primer plano de un detalle "
+        "(una taza, una rama de olivo, agua, una textura); cambia el encuadre y el sujeto "
+        "principal, no solo la decoración. NO repitas los mismos elementos (cama, ventana, mar) "
+        "si ya están en la 1. Responde SOLO con la descripción de la segunda escena en una frase, "
+        "en inglés, sin comillas ni preámbulo. Sin personas, sin caras, sin texto, sin logos.")
     usuario = f"Primera escena: {concepto1}."
     if texto_guion:
         usuario += f" Mensaje del reel: {texto_guion}."

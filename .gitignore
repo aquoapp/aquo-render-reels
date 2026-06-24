@@ -1,3 +1,5 @@
+# Clips fuente viven en Supabase Storage, NO en el repo (pesados)
+*.mp4
 __pycache__/
 *.pyc
-/tmp/
+_test*

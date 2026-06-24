@@ -56,31 +56,86 @@ def _resuelve_clip(orden):
     if clip_url:
         return _descarga(clip_url)
 
+    # ── 4º camino: BANCO INTELIGENTE (auto por pilar/familia) ──
+    # Si el panel no mandó clip pero sí pilar o familia, el banco elige una
+    # secuencia coherente (apertura→cuerpo→cierre) entre los clips que existen
+    # en el repo. Devuelve una LISTA de rutas locales (capa2 ya admite lista).
+    try:
+        from banco_clips import selecciona_secuencia, clips_disponibles, resuelve
+        if clips_disponibles():
+            n_esc = len(orden.get("guion") or []) or 4
+            nombres = selecciona_secuencia(
+                pilar=orden.get("pilar"),
+                familia=orden.get("familia"),
+                n_escenas=n_esc,
+                seed=orden.get("seed"),
+            )
+            # Cada nombre se resuelve a ruta local (dev) o URL Supabase (prod).
+            origenes = [resuelve(n) for n in nombres]
+            _log("banco inteligente eligió:", nombres)
+            rutas = []
+            for o in origenes:
+                if o.startswith("http"):
+                    rutas.append(_descarga(o))   # descarga de Supabase a /tmp
+                else:
+                    rutas.append(o)              # ya es local
+            return rutas
+    except Exception as e:
+        _log("banco inteligente no disponible, sigo al error:", repr(e))
+
     raise RuntimeError(
-        "capa 2 sin clip: falta 'clip' (banco local) o 'clipUrl'/'clips_remotos' (vídeo remoto)")
+        "capa 2 sin clip: falta 'clip' (banco local), 'clipUrl'/'clips_remotos' "
+        "(vídeo remoto) o 'pilar'/'familia' (banco inteligente)")
 
 
 def monta_reel(orden, salida):
     cwd = os.getcwd()
     os.chdir(MOTOR_DIR)
     try:
-        capa = int(orden.get("capa", 1))
+        capa_raw = orden.get("capa", 1)
+        es_pluma = (str(capa_raw).lower() == "pluma")
+        capa = 1 if es_pluma else int(capa_raw)
         familia = orden.get("familia")
         ritmo = orden.get("ritmo") or "sereno"
         cierre = orden.get("cierre") or "auto"   # 'MARFIL'|'PROFUNDO'|'auto' (Ana elige el registro del cierre)
         escala_texto = float(orden.get("escala_texto") or 1.0)   # tamaño de letra elegible (S/M/L)
-        if capa == 2:
+        if es_pluma:
+            # ── PLUMA: caligrafía manuscrita (Allura) sobre papel real. ──
+            # Formato editorial íntimo (ACOMPAÑAMIENTO/DENTRO). Rescatado del
+            # motor original; estaba construido y validado pero desconectado.
+            from anim_pluma import render_pluma
+            g = orden["guion"]
+            if isinstance(g, dict): g = [g]
+            # Las frases manuscritas salen de l1/l2 de cada escena; el subtexto
+            # (firma en Cormorant) del último l3 limpio, o del campo 'subtexto'.
+            lineas = []
+            for e in g:
+                for k in ("l1", "l2"):
+                    v = (e.get(k) or "").strip()
+                    if v: lineas.append(v)
+            subtexto = (orden.get("subtexto")
+                        or (g[-1].get("l3","").replace("*","").strip() if g else ""))
+            render_pluma(lineas, subtexto, salida=salida,
+                         papel=orden.get("papel") or "papel_pluma.png",
+                         ritmo=ritmo if ritmo in ("calmado","sereno","vivo") else "calmado")
+        elif capa == 2:
             from capa2_real import crea_reel_metraje
             clip_path = _resuelve_clip(orden)   # str (1 clip) o list (varios)
-            _es_remoto = bool(orden.get("clips_remotos") or orden.get("clipUrl") or orden.get("clip_url")) and not orden.get("clip")
             guion = orden["guion"]
             if isinstance(guion, dict): guion = [guion]
             crea_reel_metraje(clip_path, guion, salida=salida,
                               familia=familia or "PROFUNDO", ritmo=ritmo, cierre=cierre)
-            if _es_remoto:
-                for p in (clip_path if isinstance(clip_path, list) else [clip_path]):
-                    try: os.remove(p)
-                    except OSError: pass
+            # Limpieza: borra cualquier clip que sea temporal (descargado de
+            # Supabase/Grok a la carpeta temporal). Los clips locales del repo
+            # NO se borran. Robusto para banco remoto, clipUrl y clips_remotos.
+            import tempfile
+            tmpdir = tempfile.gettempdir()
+            for p in (clip_path if isinstance(clip_path, list) else [clip_path]):
+                try:
+                    if isinstance(p, str) and p.startswith(tmpdir):
+                        os.remove(p)
+                except OSError:
+                    pass
         else:
             from aquo_motor import crea_reel
             crea_reel(orden["guion"], salida=salida,
@@ -92,7 +147,7 @@ def monta_reel(orden, salida):
 
 # ── Subida a Supabase Storage (misma vía que las imágenes de entrega.mjs) ──
 # El ref se parte para que no coincida literal con la variable de entorno.
-PROJECT_REF = os.environ.get("SUPABASE_PROJECT_REF", "rscnkiwk" + "llfsdvstqhvi")
+PROJECT_REF = os.environ.get("SUPABASE_PROJECT_REF", "ksknebtl" + "opbbhnkrpsrd")  # MOTOR REDES (marketing); NUNCA la PWA
 SUPABASE_URL = os.environ.get("SUPABASE_URL", f"https://{PROJECT_REF}.supabase.co")
 BUCKET = os.environ.get("SUPABASE_BUCKET", "aquo-piezas-redes")  # público
 

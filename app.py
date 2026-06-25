@@ -28,7 +28,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/health"):
             return self._json(200, {"ok": True, "service": "aquo-render-reels"})
+        if self.path == "/reels" or self.path.startswith("/reels?"):
+            return self._reels()
         return self._json(404, {"ok": False, "error": "not found"})
+
+    def _reels(self):
+        """Galería permanente: lista los reels guardados en Supabase Storage.
+        Aunque Telegram falle o no publiques, todo reel montado queda aquí.
+        Lee del bucket (carpeta redes/reels) con la service key del entorno."""
+        try:
+            reels = montaje.lista_reels()
+            return self._json(200, {"ok": True, "total": len(reels), "reels": reels})
+        except Exception as e:
+            return self._json(500, {"ok": False, "error": str(e)})
 
     def do_POST(self):
         if self.path != "/render":

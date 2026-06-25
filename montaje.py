@@ -176,6 +176,44 @@ def sube_a_supabase(path_mp4, nombre):
     return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{path}"
 
 
+def lista_reels(limite=200):
+    """Devuelve la lista de reels guardados en Supabase (carpeta redes/reels),
+    más reciente primero, cada uno con nombre, tamaño, fecha y URL pública.
+    Es la GALERÍA permanente: todo reel montado vive aquí aunque Telegram falle
+    o no se publique. Usa la service key (privada, del entorno)."""
+    import urllib.request
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not service_key:
+        raise RuntimeError("falta SUPABASE_SERVICE_KEY en el entorno")
+    url = f"{SUPABASE_URL}/storage/v1/object/list/{BUCKET}"
+    body = json.dumps({
+        "prefix": "redes/reels/",
+        "limit": int(limite),
+        "sortBy": {"column": "created_at", "order": "desc"},
+    }).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Authorization": f"Bearer {service_key}",
+        "apikey": service_key,
+        "Content-Type": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=30) as r:
+        objs = json.loads(r.read() or "[]")
+    reels = []
+    for o in objs:
+        nombre = o.get("name")
+        if not nombre or not nombre.endswith(".mp4"):
+            continue
+        meta = o.get("metadata") or {}
+        path = f"redes/reels/{nombre}"
+        reels.append({
+            "nombre": nombre,
+            "tamano": meta.get("size"),
+            "creado": o.get("created_at") or meta.get("lastModified"),
+            "url": f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{path}",
+        })
+    return reels
+
+
 def avisa_make(video_url, pieza, caption):
     import urllib.request
     payload = json.dumps({
@@ -195,7 +233,13 @@ def trabajo(orden):
     try:
         pieza = orden.get("pieza", f"reel_{int(time.time())}")
         caption = orden.get("caption", "")
-        nombre = f"{pieza}.mp4"
+        # NOMBRE ÚNICO DE ARCHIVO (anti-caché de Telegram). La 'pieza' sigue
+        # siendo legible (reel_clar_noapp) para Telegram/costes, pero el archivo
+        # subido a Supabase lleva un sello de tiempo, así la URL es NUEVA en cada
+        # render. Telegram cachea vídeos por URL; misma URL = reenvía el vídeo
+        # viejo. Con sello único, nunca vuelve a entregar un reel cacheado.
+        sello = int(time.time())
+        nombre = f"{pieza}_{sello}.mp4"
         out = os.path.join(tempfile.gettempdir(), nombre)
         _log("montando", pieza, "capa", orden.get("capa", 1))
         # ── Medidor de costes de ESTA generación (todos los proveedores) ──
